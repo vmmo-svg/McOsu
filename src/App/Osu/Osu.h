@@ -377,8 +377,13 @@ private:
 	McFont *m_songBrowserFontBold;
 	McFont *m_fontIcons;
 
-	// debugging
-	CWindowManager *m_windowManager;
+        // debugging
+        CWindowManager *m_windowManager;
+        bool m_bDebugInfoWindowVisible;
+        bool m_bDebugInfoWindowDragging;
+        bool m_bDebugInfoWindowConsumeClick;
+        Vector2 m_vDebugInfoWindowPos;
+        Vector2 m_vDebugInfoWindowDragOffset;
 
 	// custom
 	GAMEMODE m_gamemode;
@@ -391,10 +396,15 @@ private:
 	bool m_bSkinLoadWasReload;
 	OsuSkin *m_skinScheduledToLoad;
 	bool m_bFontReloadScheduled;
-	bool m_bFireResolutionChangedScheduled;
-	bool m_bVolumeInactiveToActiveScheduled;
-	float m_fVolumeInactiveToActiveAnim;
-	bool m_bFireDelayedFontReloadAndResolutionChangeToFixDesyncedUIScaleScheduled;
+        bool m_bFireResolutionChangedScheduled;
+        bool m_bVolumeInactiveToActiveScheduled;
+        float m_fVolumeInactiveToActiveAnim;
+        bool m_bFireDelayedFontReloadAndResolutionChangeToFixDesyncedUIScaleScheduled;
+
+        void drawDebugInfoWindow(Graphics *g);
+        Vector2 getDebugInfoWindowSize() const;
+        float getDebugInfoWindowHeaderHeight() const;
+        void clampDebugInfoWindowToScreen();
 };
 
 #endif

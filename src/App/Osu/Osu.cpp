@@ -27,6 +27,8 @@
 #include "CWindowManager.h"
 //#include "DebugMonitor.h"
 
+#include <algorithm>
+
 #include "Osu2.h"
 #include "OsuVR.h"
 #include "OsuMultiplayer.h"
@@ -394,8 +396,13 @@ Osu::Osu(Osu2 *osu2, int instanceID)
 	m_fVolumeInactiveToActiveAnim = 0.0f;
 	m_bFireDelayedFontReloadAndResolutionChangeToFixDesyncedUIScaleScheduled = false;
 
-	// debug
-	m_windowManager = new CWindowManager();
+        // debug
+        m_windowManager = new CWindowManager();
+        m_bDebugInfoWindowVisible = false;
+        m_bDebugInfoWindowDragging = false;
+        m_bDebugInfoWindowConsumeClick = false;
+        m_vDebugInfoWindowPos = Vector2(30.0f, 30.0f);
+        m_vDebugInfoWindowDragOffset = Vector2(0.0f, 0.0f);
 	/*
 	DebugMonitor *dm = new DebugMonitor();
 	m_windowManager->addWindow(dm);
@@ -735,8 +742,11 @@ void Osu::draw(Graphics *g)
 	}
 	*/
 
-	m_tooltipOverlay->draw(g);
-	m_notificationOverlay->draw(g);
+        if (m_bDebugInfoWindowVisible)
+                drawDebugInfoWindow(g);
+
+        m_tooltipOverlay->draw(g);
+        m_notificationOverlay->draw(g);
 
 	// loading spinner for some async tasks
 	if ((m_bSkinLoadScheduled && m_skin != m_skinScheduledToLoad) || m_optionsMenu->isWorkshopLoading() || m_steamWorkshop->isUploading())
@@ -828,8 +838,96 @@ void Osu::draw(Graphics *g)
 	}
 
 	// now, let OpenVR draw (this internally then calls the registered callback, meaning drawVR() here)
-	if (isInVRMode())
-		openvr->draw(g);
+        if (isInVRMode())
+                openvr->draw(g);
+}
+
+Vector2 Osu::getDebugInfoWindowSize() const
+{
+        return Vector2(360.0f, 150.0f);
+}
+
+float Osu::getDebugInfoWindowHeaderHeight() const
+{
+        return 28.0f;
+}
+
+void Osu::clampDebugInfoWindowToScreen()
+{
+        const Vector2 size = getDebugInfoWindowSize();
+        const float maxX = std::max(0.0f, getScreenWidth() - size.x);
+        const float maxY = std::max(0.0f, getScreenHeight() - size.y);
+
+        if (m_vDebugInfoWindowPos.x < 0.0f)
+                m_vDebugInfoWindowPos.x = 0.0f;
+        else if (m_vDebugInfoWindowPos.x > maxX)
+                m_vDebugInfoWindowPos.x = maxX;
+
+        if (m_vDebugInfoWindowPos.y < 0.0f)
+                m_vDebugInfoWindowPos.y = 0.0f;
+        else if (m_vDebugInfoWindowPos.y > maxY)
+                m_vDebugInfoWindowPos.y = maxY;
+}
+
+void Osu::drawDebugInfoWindow(Graphics *g)
+{
+        const Vector2 size = getDebugInfoWindowSize();
+        const float headerHeight = getDebugInfoWindowHeaderHeight();
+        const Vector2 pos = m_vDebugInfoWindowPos;
+        const float padding = 10.0f;
+        const float lineSpacing = 4.0f;
+
+        g->setAlpha(1.0f);
+        g->setColor(COLOR(200, 20, 20, 20));
+        g->fillRect(pos.x, pos.y, size.x, size.y);
+
+        g->setColor(COLOR(220, 45, 45, 45));
+        g->fillRect(pos.x, pos.y, size.x, headerHeight);
+
+        g->setColor(COLOR(255, 255, 255, 255));
+        g->drawRect(pos.x, pos.y, size.x, size.y);
+
+        McFont *font = engine->getResourceManager()->getFont("FONT_DEFAULT");
+        if (font == NULL)
+                return;
+
+        g->setColor(0xffffffff);
+        g->pushTransform();
+        g->translate(pos.x + padding, pos.y + headerHeight/2.0f + font->getHeight()/2.0f);
+        g->drawString(font, UString("Debug Info"));
+        g->popTransform();
+
+        std::vector<UString> lines;
+        lines.push_back(UString("Toggle: F7 (drag header to move)"));
+        UString skinLine("Current Skin: ");
+        if (m_skin != NULL)
+                skinLine.append(m_skin->getName());
+        else
+                skinLine.append("<none>");
+        lines.push_back(skinLine);
+
+        UString sourceLine("Source: ");
+        if (m_skin != NULL)
+                sourceLine.append(m_skin->isWorkshopSkin() ? "Workshop" : "Local");
+        else
+                sourceLine.append("N/A");
+        lines.push_back(sourceLine);
+
+        if (m_skin != NULL)
+        {
+                UString pathLine("Path: ");
+                pathLine.append(m_skin->getFilePath());
+                lines.push_back(pathLine);
+        }
+
+        g->pushTransform();
+        g->translate(pos.x + padding, pos.y + headerHeight + padding + font->getHeight());
+        for (size_t i=0; i<lines.size(); i++)
+        {
+                g->drawString(font, lines[i]);
+                g->translate(0.0f, font->getHeight() + lineSpacing);
+        }
+        g->popTransform();
 }
 
 void Osu::drawVR(Graphics *g)
@@ -872,10 +970,30 @@ void Osu::update()
 	if (isInVRMode())
 		m_vr->update();
 
-	if (isInPlayMode() && m_osu_mod_fposu_ref->getBool())
-		m_fposu->update();
+        if (isInPlayMode() && m_osu_mod_fposu_ref->getBool())
+                m_fposu->update();
 
-	m_windowManager->update();
+        m_windowManager->update();
+
+        if (m_bDebugInfoWindowVisible)
+        {
+                if (m_bDebugInfoWindowDragging)
+                {
+                        const Vector2 mousePos = engine->getMouse()->getPos();
+                        Vector2 newPos(mousePos.x - m_vDebugInfoWindowDragOffset.x, mousePos.y - m_vDebugInfoWindowDragOffset.y);
+                        const Vector2 size = getDebugInfoWindowSize();
+                        const float maxX = std::max(0.0f, getScreenWidth() - size.x);
+                        const float maxY = std::max(0.0f, getScreenHeight() - size.y);
+                        newPos.x = std::min(std::max(newPos.x, 0.0f), maxX);
+                        newPos.y = std::min(std::max(newPos.y, 0.0f), maxY);
+                        m_vDebugInfoWindowPos = newPos;
+                }
+        }
+        else
+        {
+                m_bDebugInfoWindowDragging = false;
+                m_bDebugInfoWindowConsumeClick = false;
+        }
 
 	for (int i=0; i<m_screens.size(); i++)
 	{
@@ -1337,15 +1455,27 @@ void Osu::onKeyDown(KeyboardEvent &key)
 		saveScreenshot();
 
 	// boss key (minimize + mute)
-	if (key == (KEYCODE)OsuKeyBindings::BOSS_KEY.getInt())
-	{
-		engine->getEnvironment()->minimize();
-		if (getSelectedBeatmap() != NULL)
-		{
-			m_bWasBossKeyPaused = getSelectedBeatmap()->isPreviewMusicPlaying();
-			getSelectedBeatmap()->pausePreviewMusic(false);
-		}
-	}
+        if (key == (KEYCODE)OsuKeyBindings::BOSS_KEY.getInt())
+        {
+                engine->getEnvironment()->minimize();
+                if (getSelectedBeatmap() != NULL)
+                {
+                        m_bWasBossKeyPaused = getSelectedBeatmap()->isPreviewMusicPlaying();
+                        getSelectedBeatmap()->pausePreviewMusic(false);
+                }
+        }
+
+        if (key == KEY_F7)
+        {
+                m_bDebugInfoWindowVisible = !m_bDebugInfoWindowVisible;
+                if (!m_bDebugInfoWindowVisible)
+                {
+                        m_bDebugInfoWindowDragging = false;
+                        m_bDebugInfoWindowConsumeClick = false;
+                }
+                clampDebugInfoWindowToScreen();
+                key.consume();
+        }
 
 	// local hotkeys (and gameplay keys)
 
@@ -1702,11 +1832,45 @@ void Osu::onChar(KeyboardEvent &e)
 
 void Osu::onLeftChange(bool down)
 {
-	if (isInPlayMode() && !getSelectedBeatmap()->isPaused() && osu_disable_mousebuttons.getBool()) return;
+        bool handledByDebugWindow = false;
+        if (m_bDebugInfoWindowVisible)
+        {
+                if (down)
+                {
+                        const Vector2 mousePos = engine->getMouse()->getPos();
+                        const Vector2 size = getDebugInfoWindowSize();
+                        const float headerHeight = getDebugInfoWindowHeaderHeight();
+                        const bool insideHeader = (mousePos.x >= m_vDebugInfoWindowPos.x && mousePos.x <= m_vDebugInfoWindowPos.x + size.x &&
+                                mousePos.y >= m_vDebugInfoWindowPos.y && mousePos.y <= m_vDebugInfoWindowPos.y + headerHeight);
 
-	if (!m_bMouseKey1Down && down)
-	{
-		m_bMouseKey1Down = true;
+                        if (insideHeader)
+                        {
+                                m_bDebugInfoWindowDragging = true;
+                                m_bDebugInfoWindowConsumeClick = true;
+                                m_vDebugInfoWindowDragOffset = Vector2(mousePos.x - m_vDebugInfoWindowPos.x, mousePos.y - m_vDebugInfoWindowPos.y);
+                                handledByDebugWindow = true;
+                        }
+                        else
+                                m_bDebugInfoWindowConsumeClick = false;
+                }
+                else
+                {
+                        if (m_bDebugInfoWindowConsumeClick)
+                                handledByDebugWindow = true;
+
+                        m_bDebugInfoWindowDragging = false;
+                        m_bDebugInfoWindowConsumeClick = false;
+                }
+        }
+
+        if (handledByDebugWindow)
+                return;
+
+        if (isInPlayMode() && !getSelectedBeatmap()->isPaused() && osu_disable_mousebuttons.getBool()) return;
+
+        if (!m_bMouseKey1Down && down)
+        {
+                m_bMouseKey1Down = true;
 		onKey1Change(true, true);
 	}
 	else if (m_bMouseKey1Down)
@@ -2081,7 +2245,9 @@ void Osu::onResolutionChanged(Vector2 newResolution)
 {
 	debugLog("Osu::onResolutionChanged(%i, %i), minimized = %i\n", (int)newResolution.x, (int)newResolution.y, (int)engine->isMinimized());
 
-	if (engine->isMinimized()) return; // ignore if minimized
+        if (engine->isMinimized()) return; // ignore if minimized
+
+        clampDebugInfoWindowToScreen();
 
 	const float prevUIScale = getUIScale(this);
 
